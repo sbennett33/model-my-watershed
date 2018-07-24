@@ -122,6 +122,8 @@ CELERY_BROKER_URL = 'redis://{0}:{1}/2'.format(
 
 CELERY_IMPORTS = (
     # Submodule task is not always autodiscovered
+    'apps.geoprocessing_api.tasks',
+    'apps.modeling.tasks',
     'apps.modeling.mapshed.tasks',
 )
 CELERY_ACCEPT_CONTENT = ['json']
