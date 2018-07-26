@@ -346,7 +346,7 @@ def run_gwlfe(model_input, inputmod_hash, watershed_id=None):
     reader = Parser.GmsReader(output)
     z = reader.read()
 
-    result = gwlfe.run(z)
+    result, _ = gwlfe.run(z)
     result['inputmod_hash'] = inputmod_hash
     result['watershed_id'] = watershed_id
 
