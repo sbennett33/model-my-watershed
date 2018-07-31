@@ -10,10 +10,8 @@ import os
 from celery import shared_task
 
 from django.utils.timezone import now
-from django.contrib.gis.geos import GEOSGeometry
 
 from apps.modeling.models import Project
-from apps.modeling.tasks import to_gms_file
 
 from hydroshare import HydroShareService
 from models import HydroShareResource
@@ -27,84 +25,37 @@ MMW_APP_KEY_FLAG = '{"appkey": "model-my-watershed"}'
 
 
 @shared_task
-def update_resource(user_id, project_id, params):
+def create_resource(user_id, title, abstract, keywords):
     hs = hss.get_client(user_id)
-    hsresource = HydroShareResource.objects.get(project_id=project_id)
-
-    existing_files = hs.get_file_list(hsresource.resource)
-    if not existing_files:
-        raise RuntimeError('HydroShare could not find requested resource')
-
-    current_analyze_files = [
-        f['url'][(1 + f['url'].index('/analyze_')):]
-        for f in existing_files
-        if '/analyze_' in f['url']
-    ]
-
-    # Update files
-    files = params.get('files', [])
-    for md in params.get('mapshed_data', []):
-        mdata = md.get('data')
-        files.append({
-            'name': md.get('name'),
-            'contents': to_gms_file(json.loads(mdata)) if mdata else None,
-            'object': True
-        })
-
-    # Except the existing analyze files
-    files = [f for f in files if f['name'] not in current_analyze_files]
-
-    hs.add_files(hsresource.resource, files, overwrite=True)
-
-    hsresource.exported_at = now()
-    hsresource.save()
-
-    serializer = HydroShareResourceSerializer(hsresource)
-    return serializer.data
-
-
-@shared_task
-def create_resource(user_id, project_id, params):
-    hs = hss.get_client(user_id)
-    project = Project.objects.get(pk=project_id)
 
     # Convert keywords from array to set of values
-    keywords = params.get('keywords')
     keywords = set(keywords) if keywords else set()
 
     # POST new resource creates it in HydroShare
     resource = hs.createResource(
         'CompositeResource',
-        params.get('title', project.name),
-        abstract=params.get('abstract', ''),
+        title,
+        abstract=abstract,
         keywords=tuple(DEFAULT_KEYWORDS | keywords),
         extra_metadata=MMW_APP_KEY_FLAG,
     )
 
-    # Files sent from the client
-    files = params.get('files', [])
+    return resource
 
-    # AoI GeoJSON
-    aoi_geojson = GEOSGeometry(project.area_of_interest).geojson
-    files.append({
-        'name': 'area-of-interest.geojson',
-        'contents': aoi_geojson,
-    })
 
-    # MapShed Data
-    for md in params.get('mapshed_data', []):
-        mdata = md.get('data')
-        files.append({
-            'name': md.get('name'),
-            'contents': to_gms_file(json.loads(mdata)) if mdata else None,
-            'object': True
-        })
+@shared_task
+def add_file(resource, user_id, f, overwrite=False):
+    hs = hss.get_client(user_id)
 
-    # Add all files
-    hs.add_files(resource, files)
+    hs.add_file(resource, f, overwrite)
 
-    # AoI Shapefile
-    aoi_json = json.loads(aoi_geojson)
+    return resource
+
+
+@shared_task
+def add_shapefile(resource, user_id, aoi_json):
+    hs = hss.get_client(user_id)
+
     crs = {'no_defs': True, 'proj': 'longlat',
            'ellps': 'WGS84', 'datum': 'WGS84'}
     schema = {'geometry': aoi_json['type'], 'properties': {}}
@@ -120,6 +71,13 @@ def create_resource(user_id, project_id, params):
                                'area-of-interest.{}'.format(ext))
         os.remove(filename)
 
+    return resource
+
+
+@shared_task
+def add_metadata(resource, user_id):
+    hs = hss.get_client(user_id)
+
     # Make resource public and shareable
     endpoint = hs.resource(resource)
     endpoint.public(True)
@@ -131,12 +89,19 @@ def create_resource(user_id, project_id, params):
         'hs_file_type': 'GeoFeature',
     })
 
+    return resource
+
+
+@shared_task
+def link_to_project_and_save(resource, project_id, title, autosync):
+    project = Project.objects.get(pk=project_id)
+
     # Link HydroShareResrouce to Project and save
     hsresource = HydroShareResource.objects.create(
         project=project,
         resource=resource,
-        title=params.get('title', project.name),
-        autosync=params.get('autosync', True),
+        title=title,
+        autosync=autosync,
         exported_at=now()
     )
     hsresource.save()
@@ -146,5 +111,16 @@ def create_resource(user_id, project_id, params):
     project.save()
 
     # Return newly created HydroShareResource
+    serializer = HydroShareResourceSerializer(hsresource)
+    return serializer.data
+
+
+@shared_task
+def update_hydroshare_resource(_, project_id):
+    hsresource = HydroShareResource.objects.get(project_id=project_id)
+
+    hsresource.exported_at = now()
+    hsresource.save()
+
     serializer = HydroShareResourceSerializer(hsresource)
     return serializer.data

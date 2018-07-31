@@ -80,6 +80,40 @@ class HydroShareClient(HydroShare):
     Helper class for utility methods for HydroShare
     """
 
+    def add_file(self, resource_id, f, overwrite=False):
+        """
+        Helper method that will add a file to a resource.
+
+        :param resource_id: ID of the resource to add files to
+        :param f: Dict in the format
+                      {'name': 'String', 'contents': 'String', 'object': False}
+                      or
+                      {'name': 'String', 'contents': file_like_object, 'object': True}  # NOQA
+        :param overwrite: Whether to overwrite the file or not. False by default.  # NOQA
+        """
+
+        fobject = f.get('object', False)
+        fcontents = f.get('contents')
+        fname = f.get('name')
+        if fcontents and fname:
+            # Overwrite files if specified
+            if overwrite:
+                try:
+                    # Delete the resource file if it already exists
+                    self.deleteResourceFile(resource_id, fname)
+                except HydroShareNotFound:
+                    # File didn't already exists, move on
+                    pass
+
+            if fobject:
+                fio = fcontents
+            else:
+                fio = StringIO.StringIO()
+                fio.write(fcontents)
+
+            # Add the new file
+            self.addResourceFile(resource_id, fio, fname)
+
     def add_files(self, resource_id, files, overwrite=False):
         """
         Helper method that will add an array of files to a resource.
@@ -93,27 +127,7 @@ class HydroShareClient(HydroShare):
         """
 
         for f in files:
-            fobject = f.get('object', False)
-            fcontents = f.get('contents')
-            fname = f.get('name')
-            if fcontents and fname:
-                # Overwrite files if specified
-                if overwrite:
-                    try:
-                        # Delete the resource file if it already exists
-                        self.deleteResourceFile(resource_id, fname)
-                    except HydroShareNotFound:
-                        # File didn't already exists, move on
-                        pass
-
-                if fobject:
-                    fio = fcontents
-                else:
-                    fio = StringIO.StringIO()
-                    fio.write(fcontents)
-
-                # Add the new file
-                self.addResourceFile(resource_id, fio, fname)
+            self.add_file(resource_id, f, overwrite)
 
     def check_resource_exists(self, resource_id):
         try:
