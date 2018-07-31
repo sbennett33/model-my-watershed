@@ -41,7 +41,7 @@ MMW_APP_KEY_FLAG = '{"appkey": "model-my-watershed"}'
 def hydroshare(request):
     # Get HydroShare client with user's credentials
     try:
-        hs = hss.get_client(request.user)
+        hs = hss.get_client(request.user.id)
     except ObjectDoesNotExist:
         return Response(
             data={'errors': ['User not connected to HydroShare']},
