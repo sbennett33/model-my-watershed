@@ -44,6 +44,15 @@ def create_resource(user_id, title, abstract, keywords):
 
 
 @shared_task
+def add_files(resource, user_id, fs, overwrite=False):
+    hs = hss.get_client(user_id)
+
+    hs.add_files(resource, fs, overwrite)
+
+    return resource
+
+
+@shared_task
 def add_file(resource, user_id, f, overwrite=False):
     hs = hss.get_client(user_id)
 
@@ -54,6 +63,9 @@ def add_file(resource, user_id, f, overwrite=False):
 
 @shared_task
 def add_shapefile(resource, user_id, aoi_json):
+    if not isinstance(resource, basestring):
+        resource = resource[0]
+
     hs = hss.get_client(user_id)
 
     crs = {'no_defs': True, 'proj': 'longlat',

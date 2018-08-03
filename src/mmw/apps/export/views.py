@@ -20,6 +20,8 @@ from rest_framework import decorators, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
+from celery import group
+
 from apps.modeling.models import Project
 from apps.modeling.serializers import AoiSerializer
 from apps.modeling.tasks import to_gms_file
@@ -31,6 +33,7 @@ from serializers import HydroShareResourceSerializer
 from tasks import (
     create_resource,
     add_file,
+    add_files,
     add_metadata,
     add_shapefile,
     link_to_project_and_save,
@@ -176,8 +179,15 @@ def hydroshare(request):
 
     chain = [create_resource.s(request.user.id, title, abstract, keywords)]
 
-    for f in files:
-        chain.append(add_file.s(request.user.id, f))
+    group_size = 8
+    files_per_group = len(files) // group_size
+    file_groups = [files[i:i+files_per_group]
+                   for i in range(0, len(files), files_per_group)]
+    if len(files) % group_size > 0:
+        file_groups[group_size - 1].extend(
+            files[files_per_group * group_size:])
+
+    chain.append(group([add_files.s(request.user.id, g) for g in file_groups]))
 
     chain.append(add_shapefile.s(request.user.id, aoi_json))
     chain.append(add_metadata.s(request.user.id))
